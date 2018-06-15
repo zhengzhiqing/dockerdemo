@@ -1,0 +1,101 @@
+buildscript {
+	ext {
+		springBootVersion = '2.0.2.RELEASE'
+	}
+	repositories {
+		jcenter()
+		mavenCentral()
+	}
+	dependencies {
+		classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+		classpath('com.palantir.gradle.docker:gradle-docker:0.13.0')
+	}
+}
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'com.palantir.docker'
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = 1.8
+
+repositories {
+	mavenCentral()
+}
+
+configurations {
+	mybatisGenerator
+}
+
+dependencies {
+
+	compile 'mysql:mysql-connector-java:5.1.35'
+	compile 'com.zaxxer:HikariCP:2.5.1'
+
+	compile('org.springframework.boot:spring-boot-starter')
+	compile('org.springframework.boot:spring-boot-starter-web')
+	compile 'org.springframework.boot:spring-boot-starter-jdbc'
+
+	compile "org.mybatis.spring.boot:mybatis-spring-boot-starter:1.3.1"
+	compile 'org.mybatis.generator:mybatis-generator:1.3.5'
+
+	mybatisGenerator 'org.mybatis.generator:mybatis-generator-core:1.3.5'
+	mybatisGenerator 'mysql:mysql-connector-java:5.1.35'
+
+}
+
+def getDbProperties = {
+	def properties = new Properties()
+	file("${project.projectDir}/src/main/resources/generator/mysql.properties").withInputStream { inputStream ->
+		properties.load(inputStream)
+	}
+	properties;
+}
+
+
+task dbgen << {
+	def properties = getDbProperties()
+
+	project.ant.properties['targetProject'] = projectDir.path
+	project.ant.properties['driverClass'] = properties.getProperty("jdbc.driverClassName")
+	project.ant.properties['connectionURL'] = properties.getProperty("jdbc.url")
+	project.ant.properties['userId'] = properties.getProperty("jdbc.user")
+	project.ant.properties['password'] = properties.getProperty("jdbc.pass")
+	project.ant.properties['src_main_java'] = sourceSets.main.java.srcDirs[0].path
+	project.ant.properties['src_main_resources'] = sourceSets.main.resources.srcDirs[0].path
+	project.ant.properties['modelPackage'] = project.modelPackage
+	project.ant.properties['mapperPackage'] = project.mapperPackage
+	project.ant.properties['sqlMapperPackage'] = project.sqlMapperPackage
+
+	project.ant.taskdef(
+			name: 'mbgenerator',
+			classname: 'org.mybatis.generator.ant.GeneratorAntTask',
+			classpath: configurations.mybatisGenerator.asPath
+	)
+	project.ant.mbgenerator(overwrite: false,
+			configfile: "${project.projectDir}/src/main/resources/generator/generatorConfig.xml", verbose: true) {
+		propertyset {
+			propertyref(name: 'targetProject')
+			propertyref(name: 'userId')
+			propertyref(name: 'driverClass')
+			propertyref(name: 'connectionURL')
+			propertyref(name: 'password')
+			propertyref(name: 'src_main_java')
+			propertyref(name: 'src_main_resources')
+			propertyref(name: 'modelPackage')
+			propertyref(name: 'mapperPackage')
+			propertyref(name: 'sqlMapperPackage')
+
+		}
+	}
+}
+
+docker {
+	dependsOn build
+	name "${project.group}/${bootJar.baseName}"
+	files bootJar.archivePath
+	buildArgs(['JAR_FILE': "${bootJar.archiveName}"])
+}
